@@ -1,36 +1,157 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import { useMemo, useState } from "react";
 
-function App() {
-  const [count, setCount] = useState(0)
+const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 
-  return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React Ver 2.0</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.jsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
+async function safeReadText(res) {
+  try {
+    return await res.text();
+  } catch {
+    return "";
+  }
 }
 
-export default App
-  
+function formatScore(v) {
+  if (typeof v !== "number" || Number.isNaN(v)) return "-";
+  return v.toFixed(3);
+}
+
+export default function App() {
+  const [text, setText] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [result, setResult] = useState(null);
+
+  // 接続ステータス: 未確認/OK/NG/未設定
+  const [apiStatus, setApiStatus] = useState("unchecked"); // unchecked | ok | ng | unset
+
+  const canSubmit = useMemo(() => {
+    const len = text.trim().length;
+    return !loading && len > 0 && len <= 1000;
+  }, [text, loading]);
+
+  const apiStatusLabel =
+    !API_BASE
+      ? "未設定"
+      : apiStatus === "ok"
+        ? "接続OK"
+        : apiStatus === "ng"
+          ? "接続NG"
+          : "未確認";
+
+  async function onSubmit(e) {
+    e.preventDefault();
+    setError("");
+    setResult(null);
+
+    if (!API_BASE) {
+      setApiStatus("unset");
+      setError("API の設定がありません（VITE_API_BASE_URL を確認してください）。");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/analyze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: text.trim() }),
+      });
+
+      if (!res.ok) {
+        const bodyText = await safeReadText(res);
+        throw new Error(bodyText || `HTTP ${res.status}`);
+      }
+
+      const data = await res.json();
+      setResult(data);
+      setApiStatus("ok"); // 成功＝接続OK
+    } catch (err) {
+      setApiStatus("ng"); // 失敗＝接続NG
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const sentiment = result?.sentiment ?? "UNKNOWN";
+  const scores = result?.scores ?? result?.SentimentScore ?? null;
+
+  const sentimentClass =
+    sentiment === "POSITIVE"
+      ? "sentiment-positive"
+      : sentiment === "NEGATIVE"
+        ? "sentiment-negative"
+        : sentiment === "MIXED"
+          ? "sentiment-mixed"
+          : sentiment === "NEUTRAL"
+            ? "sentiment-neutral"
+            : "sentiment-unknown";
+
+  return (
+    <div className="page">
+      <main className="card">
+        <div className="header">
+          <div>
+            <h1 className="title">感情分析デモ</h1>
+            {/* URLは表示しない */}
+            <p className="subtitle">API接続: {apiStatusLabel}</p>
+          </div>
+        </div>
+
+        <form onSubmit={onSubmit} className="form">
+          <textarea
+            className="textarea"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="ここに文章を入力してください（最大1000文字）"
+          />
+
+          <div className="row">
+            <small className="counter">{text.length} / 1000</small>
+
+            <button type="submit" className="btn" disabled={!canSubmit}>
+              {loading ? "分析中..." : "分析する"}
+            </button>
+          </div>
+
+          <p className="hint">
+            改行しやすいように Enter 送信ではなくボタン送信にしています。
+          </p>
+        </form>
+
+        {error && <div className="alert alert--error">{error}</div>}
+
+        {result && (
+          <section className="resultCard">
+            <h2 className="h2">結果</h2>
+
+            <div className="badges">
+              <span className={`badge ${sentimentClass}`}>
+                sentiment: <strong>{sentiment}</strong>
+              </span>
+
+              {scores && (
+                <>
+                  <span className="badge badge--pos">
+                    Positive: <strong>{formatScore(scores.Positive)}</strong>
+                  </span>
+                  <span className="badge badge--neg">
+                    Negative: <strong>{formatScore(scores.Negative)}</strong>
+                  </span>
+                  <span className="badge badge--neu">
+                    Neutral: <strong>{formatScore(scores.Neutral)}</strong>
+                  </span>
+                  <span className="badge badge--mix">
+                    Mixed: <strong>{formatScore(scores.Mixed)}</strong>
+                  </span>
+                </>
+              )}
+            </div>
+
+            <pre className="pre">{JSON.stringify(result, null, 2)}</pre>
+          </section>
+        )}
+      </main>
+    </div>
+  );
+}
