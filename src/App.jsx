@@ -1,4 +1,7 @@
 import { useMemo, useState } from "react";
+import { Authenticator } from '@aws-amplify/ui-react';
+import '@aws-amplify/ui-react/styles.css';
+import { fetchAuthSession } from 'aws-amplify/auth';
 
 const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
 
@@ -15,14 +18,29 @@ function formatScore(v) {
   return v.toFixed(3);
 }
 
+// ★修正箇所: Authenticatorに設定を追加
 export default function App() {
+  return (
+    <Authenticator
+      // これを追加すると、Create Account画面にEmail入力欄が表示されます
+      signUpAttributes={['email']}
+    >
+    
+      {({ signOut, user }) => (
+        <MainApp signOut={signOut} user={user} />
+      )}
+    </Authenticator>
+  );
+}
+
+// --- 以下、MainAppの中身は変更ありません ---
+
+function MainApp({ signOut, user }) {
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
-
-  // 接続ステータス: 未確認/OK/NG/未設定
-  const [apiStatus, setApiStatus] = useState("unchecked"); // unchecked | ok | ng | unset
+  const [apiStatus, setApiStatus] = useState("unchecked");
 
   const canSubmit = useMemo(() => {
     const len = text.trim().length;
@@ -51,9 +69,19 @@ export default function App() {
 
     setLoading(true);
     try {
+      const session = await fetchAuthSession();
+      const token = session.tokens?.idToken?.toString();
+
+      if (!token) {
+        throw new Error("認証トークンの取得に失敗しました");
+      }
+
       const res = await fetch(`${API_BASE}/analyze`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          "Authorization": token 
+        },
         body: JSON.stringify({ text: text.trim() }),
       });
 
@@ -64,9 +92,9 @@ export default function App() {
 
       const data = await res.json();
       setResult(data);
-      setApiStatus("ok"); // 成功＝接続OK
+      setApiStatus("ok");
     } catch (err) {
-      setApiStatus("ng"); // 失敗＝接続NG
+      setApiStatus("ng");
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
@@ -93,8 +121,17 @@ export default function App() {
         <div className="header">
           <div>
             <h1 className="title">感情分析デモ</h1>
-            {/* URLは表示しない */}
-            <p className="subtitle">API接続: {apiStatusLabel}</p>
+            <p className="subtitle">ユーザー: {user?.signInDetails?.loginId || user?.username}</p>
+            <p className="subtitle" style={{marginTop: '4px'}}>API接続: {apiStatusLabel}</p>
+          </div>
+          <div>
+             <button 
+               onClick={signOut} 
+               className="btn" 
+               style={{ backgroundColor: '#4b5563', fontSize: '12px', padding: '8px 12px' }}
+             >
+               ログアウト
+             </button>
           </div>
         </div>
 
